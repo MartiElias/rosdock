@@ -1,11 +1,11 @@
 # Defaults globales
-default_image: ros:humble
+default_image: ros2_humble
 default_root: /work
 default_pattern: "*_ws"
 default_depth: 2
 default_order: bottomup
 gpus: false
-entrypoint_path: "~/.config/cdocker/entrypoint.sh"
+entrypoint_path: "~/.config/rosdock/entrypoint.sh"
 
 # Variables de entorno comunes
 env:
@@ -16,10 +16,3 @@ env:
 mounts:
   - "type=bind,src=$HOME/.colcon,dst=/root/.colcon"
   - "type=bind,src=$HOME/.cache/ccache,dst=/root/.cache/ccache"
-
-# Perfiles (opcional; tu CLI podría usarlos en el futuro)
-profiles:
-  humble:
-    image: ros:humble
-  iron:
-    image: ros:iron

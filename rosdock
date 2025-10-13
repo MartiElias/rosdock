@@ -12,7 +12,7 @@ DEPTH="1"
 ORDER="topdown"      # topdown|bottomup
 GPUS="0"             # "1" => --gpus all
 USE_EP="auto"        # auto|on|off
-EP_PATH="${HOME}/.config/cdocker/entrypoint.sh"
+EP_PATH="${HOME}/.config/rosdock/entrypoint.sh"
 EXTRA_ENVS=()
 EXTRA_MOUNTS=()
 SUBCMD="run"         # run|attach
@@ -20,7 +20,7 @@ SUBCMD="run"         # run|attach
 # -----------------------------
 # Helpers
 # -----------------------------
-die(){ echo "cdocker: $*" >&2; exit 1; }
+die(){ echo "rosdock: $*" >&2; exit 1; }
 
 have(){ command -v "$1" >/dev/null 2>&1; }
 
@@ -37,14 +37,14 @@ docker_ok(){
 
 usage(){
   cat <<EOF
-Uso: cdocker [opciones] [--] [CMD...]        (modo por defecto = run)
-     cdocker attach                           (intenta entrar a un contenedor existente)
+Uso: rosdock [opciones] [--] [CMD...]        (modo por defecto = run)
+     rosdock attach                           (intenta entrar a un contenedor existente)
 
 Opciones:
   --image=IMAGEN           (def: $IMAGE)
   --dir=PATRON             patrón de carpetas a montar como ws (def: $DIR_GLOB)
   --root=PATH              raíz dentro del contenedor (def: $ROOT)
-  --name=NOMBRE            nombre del contenedor (def: cdocker-<carpeta>-<hash>)
+  --name=NOMBRE            nombre del contenedor (def: rosdock-<carpeta>-<hash>)
   --depth=N                profundidad de búsqueda (def: $DEPTH)
   --order=topdown|bottomup orden de overlay (def: $ORDER)
   --gpus                   añade --gpus all
@@ -56,16 +56,16 @@ Opciones:
   -h, --help               ayuda
 
 Ejemplos:
-  cdocker --image=ros:humble --dir='*_ws'
-  cdocker --image=myimg --depth=2 --order=bottomup -- bash -lc "colcon build && bash"
-  cdocker attach
+  rosdock --image=ros:humble --dir='*_ws'
+  rosdock --image=myimg --depth=2 --order=bottomup -- bash -lc "colcon build && bash"
+  rosdock attach
 EOF
 }
 
 # -----------------------------
 # Cargar config YAML si hay yq
 # -----------------------------
-CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/cdocker/config.yml"
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/rosdock/config.yml"
 if [[ -f "$CONFIG_FILE" ]] && have yq; then
   IMAGE="$(yq -r '.default_image // "'"$IMAGE"'"' "$CONFIG_FILE")"
   ROOT="$(yq -r '.default_root // "'"$ROOT"'"' "$CONFIG_FILE")"
@@ -128,16 +128,16 @@ if [[ "$SUBCMD" == "attach" ]]; then
   # buscar contenedor por labels de este directorio o por basename
   PWD_ABS="$(pwd)"
   BASE="$(basename "$PWD_ABS")"
-  id="$(docker ps --filter "label=cdocker.managed=1" \
-                  --filter "label=cdocker.workdir=$PWD_ABS" \
+  id="$(docker ps --filter "label=rosdock.managed=1" \
+                  --filter "label=rosdock.workdir=$PWD_ABS" \
                   --format '{{.ID}}' | head -n1)"
   if [[ -z "$id" ]]; then
-    id="$(docker ps --filter "label=cdocker.managed=1" \
-                    --filter "label=cdocker.project_base=$BASE" \
+    id="$(docker ps --filter "label=rosdock.managed=1" \
+                    --filter "label=rosdock.project_base=$BASE" \
                     --format '{{.ID}}' | head -n1)"
   fi
-  [[ -z "$id" ]] && die "no hay contenedor cdocker activo que coincida; arráncalo con 'cdocker ...'"
-  exec docker exec -it -e INSIDE_CDOCKER=1 -e TERM="$TERM" -e COLORTERM="$COLORTERM" "$id" "${CMD[@]}"
+  [[ -z "$id" ]] && die "no hay contenedor rosdock activo que coincida; arráncalo con 'rosdock ...'"
+  exec docker exec -it -e INSIDE_rosdock=1 -e TERM="$TERM" -e COLORTERM="$COLORTERM" "$id" "${CMD[@]}"
 fi
 
 # -----------------------------
@@ -146,7 +146,7 @@ fi
 PWD_ABS="$(pwd)"
 BASE="$(basename "$PWD_ABS")"
 HASH="$(sha8 "$PWD_ABS")"
-[[ -z "$NAME" ]] && NAME="cdocker-${BASE}-${HASH}"
+[[ -z "$NAME" ]] && NAME="rosdock-${BASE}-${HASH}"
 
 # 1) detectar directorios *_ws
 mapfile -t WS_DIRS < <(
@@ -169,9 +169,9 @@ for hostdir in "${WS_DIRS[@]}"; do
   sep=":"
 done
 
-echo "[cdocker] image=$IMAGE  root=$ROOT  name=$NAME"
-echo "[cdocker] dir_glob='$DIR_GLOB' depth=$DEPTH order=$ORDER"
-echo "[cdocker] workspaces detectados: ${#WS_DIRS[@]}"
+echo "[rosdock] image=$IMAGE  root=$ROOT  name=$NAME"
+echo "[rosdock] dir_glob='$DIR_GLOB' depth=$DEPTH order=$ORDER"
+echo "[rosdock] workspaces detectados: ${#WS_DIRS[@]}"
 for x in "${WS_DIRS[@]}"; do echo "  - $x"; done
 
 # -----------------------------
@@ -180,9 +180,9 @@ for x in "${WS_DIRS[@]}"; do echo "  - $x"; done
 DOCKER_ARGS=(
   run -it --rm
   --name "$NAME"
-  --label cdocker.managed=1
-  --label "cdocker.workdir=$PWD_ABS"
-  --label "cdocker.project_base=$BASE"
+  --label rosdock.managed=1
+  --label "rosdock.workdir=$PWD_ABS"
+  --label "rosdock.project_base=$BASE"
   --mount "type=bind,src=$PWD_ABS,dst=$ROOT"
   -e "PROJECT_NAME=$BASE"
   -e "SEARCH_ROOT=$ROOT"
@@ -207,8 +207,8 @@ maybe_add_entrypoint() {
   # Sólo si está en auto u on y el script existe
   [[ "$USE_EP" == "off" ]] && return 0
   if [[ -f "$EP_PATH" ]]; then
-    DOCKER_ARGS+=( --mount "type=bind,src=$EP_PATH,dst=/cdocker/entrypoint.sh,ro" )
-    DOCKER_ARGS+=( --entrypoint /cdocker/entrypoint.sh )
+    DOCKER_ARGS+=( --mount "type=bind,src=$EP_PATH,dst=/rosdock/entrypoint.sh,ro" )
+    DOCKER_ARGS+=( --entrypoint /rosdock/entrypoint.sh )
   elif [[ "$USE_EP" == "on" ]]; then
     die "entrypoint requerido (--entrypoint=on) pero no existe en $EP_PATH"
   fi
