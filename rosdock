@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ARGC_ORIG=$#   # para saber si rosdock fue llamado con argumentos
+PWD_ABS="$(pwd)"
 
 ensure_local_config() {
 
@@ -112,7 +113,10 @@ EOF
 # -----------------------------
 # Cargar config YAML si hay yq
 # -----------------------------
-CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/rosdock/config.yml"
+CONFIG_FILE="${XDG_CONFIG_HOME:-$PWD_ABS/.config}/rosdock/config.yml"
+echo ""
+echo $CONFIG_FILE
+echo ""
 if [[ -f "$CONFIG_FILE" ]] && have yq; then
   IMAGE="$(yq -r '.default_image // "'"$IMAGE"'"' "$CONFIG_FILE")"
   ROOT="$(yq -r '.default_root // "'"$ROOT"'"' "$CONFIG_FILE")"
@@ -126,6 +130,11 @@ if [[ -f "$CONFIG_FILE" ]] && have yq; then
   fi
 
 fi
+
+echo ""
+echo $ROOT
+echo ""
+
 
 # -----------------------------
 # Parse CLI
@@ -153,7 +162,6 @@ CMD=( "$@" )
 
 docker_ok
 
-PWD_ABS="$(pwd)"
 BASE="$(basename "$PWD_ABS")"
 [[ -z "$NAME" ]] && NAME="rosdock-${BASE}-${HASH}"
 
