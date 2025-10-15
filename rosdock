@@ -1,21 +1,79 @@
 #!/usr/bin/env bash
 set -euo pipefail
+ARGC_ORIG=$#   # para saber si rosdock fue llamado con argumentos
+
+ensure_local_config() {
+
+  local cfg_dir="$PWD/.config/rosdock"
+  local cfg_yml="$cfg_dir/config.yml"
+  local ep_sh="$cfg_dir/entrypoint.sh"
+  local bashfile="$cfg_dir/bashfile.txt"
+
+  # crea carpeta si no existe
+  mkdir -p "$cfg_dir"
+
+  # decide valores a escribir en config.yml
+  local image_val root_val name_val
+  if (( ARGC_ORIG > 0 )); then
+    # usar lo que haya quedado configurado por CLI/YAML (ya parseado)
+    image_val="${IMAGE:-ros:humble}"
+    root_val="${ROOT:-/work}"
+    name_val="${NAME:-ros}"
+  else
+    # ejemplos por defecto si no hubo argumentos
+    image_val="image_name"
+    root_val="work_dir"
+    name_val="container_name"
+  fi
+
+  # crea config.yml si no existe
+  if [[ ! -f "$cfg_yml" ]]; then
+    cat > "$cfg_yml" <<EOF
+# Local rosdock config (auto-generated)
+default_image: ${image_val}
+default_root: ${root_val}
+gpus: ${GPUS:-0}
+env:
+  LANG: C.UTF-8
+  RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+entrypoint_path: "./.config/rosdock/entrypoint.sh"
+EOF
+    echo "[rosdock] created $cfg_yml"
+  fi
+
+  # crea entrypoint.sh si no existe (plantilla mínima segura)
+  if [[ ! -f "$ep_sh" ]]; then
+    cat > "$ep_sh" <<'EOSH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+cat /rosdock/source_ws.txt >> ~/.bashrc
+# Ejecuta el comando recibido
+exec "$@"
+EOSH
+    echo "[rosdock] create $ep_sh"
+    chmod +x $ep_sh
+  fi
+
+  if [[ ! -f "$bashfile" ]]; then
+    cat > "$bashfile" <<'EOSH'
+# soruce $ROSDOCK_WS/ros2_ws/install/setup.bash
+EOSH
+    echo "[rosdock] create $bashfile"
+  fi
+}
+
+ensure_local_config
 
 # -----------------------------
 # Defaults (pueden venir de config.yml o CLI)
 # -----------------------------
 IMAGE="ros:humble"
-DIR_GLOB="*_ws"
 ROOT="/work"
-NAME=""
-DEPTH="1"
-ORDER="topdown"      # topdown|bottomup
+NAME="ros"
 GPUS="0"             # "1" => --gpus all
-USE_EP="auto"        # auto|on|off
-EP_PATH="${HOME}/.config/rosdock/entrypoint.sh"
-EXTRA_ENVS=()
-EXTRA_MOUNTS=()
 SUBCMD="run"         # run|attach
+EXTRA_ENVS=()
 
 # -----------------------------
 # Helpers
@@ -23,12 +81,6 @@ SUBCMD="run"         # run|attach
 die(){ echo "rosdock: $*" >&2; exit 1; }
 
 have(){ command -v "$1" >/dev/null 2>&1; }
-
-sha8(){  # hash corto para nombres únicos por carpeta
-  if have sha1sum; then printf %s "$1" | sha1sum | cut -c1-8
-  elif have shasum; then printf %s "$1" | shasum -a1 | cut -c1-8
-  else echo "00000000"; fi
-}
 
 docker_ok(){
   have docker || die "docker no está en PATH"
@@ -42,16 +94,11 @@ Uso: rosdock [opciones] [--] [CMD...]        (modo por defecto = run)
 
 Opciones:
   --image=IMAGEN           (def: $IMAGE)
-  --dir=PATRON             patrón de carpetas a montar como ws (def: $DIR_GLOB)
   --root=PATH              raíz dentro del contenedor (def: $ROOT)
   --name=NOMBRE            nombre del contenedor (def: rosdock-<carpeta>-<hash>)
-  --depth=N                profundidad de búsqueda (def: $DEPTH)
-  --order=topdown|bottomup orden de overlay (def: $ORDER)
   --gpus                   añade --gpus all
   --env KEY=VAL            añade variable de entorno (repetible)
   --mount spec             añade --mount (repetible, formato docker --mount)
-  --entrypoint=auto|on|off controla uso de entrypoint dinámico (def: auto)
-  --entrypoint-path=RUTA   script a montar como entrypoint (def: $EP_PATH)
   attach                   subcomando: adjunta a contenedor existente del proyecto
   -h, --help               ayuda
 
@@ -69,24 +116,15 @@ CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/rosdock/config.yml"
 if [[ -f "$CONFIG_FILE" ]] && have yq; then
   IMAGE="$(yq -r '.default_image // "'"$IMAGE"'"' "$CONFIG_FILE")"
   ROOT="$(yq -r '.default_root // "'"$ROOT"'"' "$CONFIG_FILE")"
-  DIR_GLOB="$(yq -r '.default_pattern // "'"$DIR_GLOB"'"' "$CONFIG_FILE")"
-  DEPTH="$(yq -r '.default_depth // "'"$DEPTH"'"' "$CONFIG_FILE")"
-  ORDER="$(yq -r '.default_order // "'"$ORDER"'"' "$CONFIG_FILE")"
   GPUS_VAL="$(yq -r '.gpus // "false"' "$CONFIG_FILE")"
   [[ "$GPUS_VAL" == "true" ]] && GPUS="1"
-  # env por defecto
-  while IFS= read -r kv; do
-    [[ -z "$kv" || "$kv" == "null" ]] && continue
-    EXTRA_ENVS+=( -e "$kv" )
-  done < <(yq -r '.env | to_entries | .[] | "\(.key)=\(.value)"' "$CONFIG_FILE" 2>/dev/null || true)
-  # mounts por defecto
-  while IFS= read -r m; do
-    [[ -z "$m" || "$m" == "null" ]] && continue
-    EXTRA_MOUNTS+=( --mount "$m" )
-  done < <(yq -r '.mounts[]?' "$CONFIG_FILE" 2>/dev/null || true)
-  # entrypoint path opcional
-  EP_PATH_CFG="$(yq -r '.entrypoint_path // "null"' "$CONFIG_FILE")"
-  [[ "$EP_PATH_CFG" != "null" ]] && EP_PATH="$EP_PATH_CFG"
+  # Leer variables de entorno desde config.yml (si existen)
+  if yq -e '.env' "$CONFIG_FILE" >/dev/null 2>&1; then
+    while IFS="=" read -r key val; do
+      [[ -n "$key" && -n "$val" ]] && EXTRA_ENVS+=( -e "$key=$val" )
+    done < <(yq -r '.env | to_entries[] | "\(.key)=\(.value)"' "$CONFIG_FILE")
+  fi
+
 fi
 
 # -----------------------------
@@ -97,18 +135,12 @@ if [[ $# -gt 0 && "$1" == "attach" ]]; then SUBCMD="attach"; shift; fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --image=*) IMAGE="${1#*=}" ;;
-    --dir=*) DIR_GLOB="${1#*=}" ;;
     --root=*) ROOT="${1#*=}" ;;
     --name=*) NAME="${1#*=}" ;;
-    --depth=*) DEPTH="${1#*=}" ;;
-    --order=*) ORDER="${1#*=}" ;;
     --gpus) GPUS="1" ;;
     --env) shift; [[ $# -gt 0 ]] || die "--env requiere KEY=VAL"; EXTRA_ENVS+=( -e "$1" ) ;;
     --env=*) EXTRA_ENVS+=( -e "${1#*=}" ) ;;
     --mount) shift; [[ $# -gt 0 ]] || die "--mount requiere spec"; EXTRA_MOUNTS+=( --mount "$1" ) ;;
-    --mount=*) EXTRA_MOUNTS+=( --mount "${1#*=}" ) ;;
-    --entrypoint=*) USE_EP="${1#*=}" ;;     # auto|on|off
-    --entrypoint-path=*) EP_PATH="${1#*=}" ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     *) break ;;
@@ -121,103 +153,41 @@ CMD=( "$@" )
 
 docker_ok
 
-# -----------------------------
-# Subcomando: attach
-# -----------------------------
-if [[ "$SUBCMD" == "attach" ]]; then
-  # buscar contenedor por labels de este directorio o por basename
-  PWD_ABS="$(pwd)"
-  BASE="$(basename "$PWD_ABS")"
-  id="$(docker ps --filter "label=rosdock.managed=1" \
-                  --filter "label=rosdock.workdir=$PWD_ABS" \
-                  --format '{{.ID}}' | head -n1)"
-  if [[ -z "$id" ]]; then
-    id="$(docker ps --filter "label=rosdock.managed=1" \
-                    --filter "label=rosdock.project_base=$BASE" \
-                    --format '{{.ID}}' | head -n1)"
-  fi
-  [[ -z "$id" ]] && die "no hay contenedor rosdock activo que coincida; arráncalo con 'rosdock ...'"
-  exec docker exec -it -e INSIDE_rosdock=1 -e TERM="$TERM" -e COLORTERM="$COLORTERM" "$id" "${CMD[@]}"
-fi
-
-# -----------------------------
-# RUN: descubrir workspaces y preparar run
-# -----------------------------
 PWD_ABS="$(pwd)"
 BASE="$(basename "$PWD_ABS")"
-HASH="$(sha8 "$PWD_ABS")"
 [[ -z "$NAME" ]] && NAME="rosdock-${BASE}-${HASH}"
 
-# 1) detectar directorios *_ws
-mapfile -t WS_DIRS < <(
-  if [[ "$DEPTH" = "1" ]]; then
-    shopt -s nullglob
-    for d in "$PWD_ABS"/$DIR_GLOB; do [[ -d "$d" ]] && echo "$d"; done
-    shopt -u nullglob
-  else
-    find "$PWD_ABS" -maxdepth "$DEPTH" -type d -name "$DIR_GLOB"
-  fi
-)
-
-# 2) construir WS_EXPLICIT como rutas dentro del contenedor
-WS_EXPLICIT=""
-sep=""
-for hostdir in "${WS_DIRS[@]}"; do
-  rel="${hostdir#$PWD_ABS/}"
-  ctr="$ROOT/$rel"
-  WS_EXPLICIT+="${sep}${ctr}"
-  sep=":"
-done
-
 echo "[rosdock] image=$IMAGE  root=$ROOT  name=$NAME"
-echo "[rosdock] dir_glob='$DIR_GLOB' depth=$DEPTH order=$ORDER"
-echo "[rosdock] workspaces detectados: ${#WS_DIRS[@]}"
-for x in "${WS_DIRS[@]}"; do echo "  - $x"; done
 
 # -----------------------------
 # Preparar docker run args
 # -----------------------------
 DOCKER_ARGS=(
   run -it --rm
+  --network host
+  -e DISPLAY=${DISPLAY}
+  -e TERM="$TERM" 
+  -e COLORTERM="${COLORTERM:-truecolor}"
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw
   --name "$NAME"
-  --label rosdock.managed=1
-  --label "rosdock.workdir=$PWD_ABS"
-  --label "rosdock.project_base=$BASE"
   --mount "type=bind,src=$PWD_ABS,dst=$ROOT"
-  -e "PROJECT_NAME=$BASE"
-  -e "SEARCH_ROOT=$ROOT"
-  -e "WS_GLOB=$DIR_GLOB"
-  -e "WS_DEPTH=$DEPTH"
-  -e "WS_ORDER=$ORDER"
-  -e "REQUIRE_INSTALL=1"
+  -v $PWD_ABS/.config/rosdock:/rosdock
+  --entrypoint /rosdock/entrypoint.sh
 )
 
-# Extra envs y mounts de config/CLI
-[[ ${#EXTRA_ENVS[@]} -gt 0 ]] && DOCKER_ARGS+=( "${EXTRA_ENVS[@]}" )
-[[ ${#EXTRA_MOUNTS[@]} -gt 0 ]] && DOCKER_ARGS+=( "${EXTRA_MOUNTS[@]}" )
+# Añadir variables de entorno extra del config.yml (idioma midelware)
+DOCKER_ARGS+=( "${EXTRA_ENVS[@]}" )
 
-# WS_EXPLICIT si hay
-[[ -n "$WS_EXPLICIT" ]] && DOCKER_ARGS+=( -e "WS_EXPLICIT=$WS_EXPLICIT" )
 
 # GPUs
 [[ "$GPUS" == "1" ]] && DOCKER_ARGS+=( --gpus all )
 
-# EntryPoint: auto|on|off
-maybe_add_entrypoint() {
-  # Sólo si está en auto u on y el script existe
-  [[ "$USE_EP" == "off" ]] && return 0
-  if [[ -f "$EP_PATH" ]]; then
-    DOCKER_ARGS+=( --mount "type=bind,src=$EP_PATH,dst=/rosdock/entrypoint.sh,ro" )
-    DOCKER_ARGS+=( --entrypoint /rosdock/entrypoint.sh )
-  elif [[ "$USE_EP" == "on" ]]; then
-    die "entrypoint requerido (--entrypoint=on) pero no existe en $EP_PATH"
-  fi
-}
-maybe_add_entrypoint
 
 # Imagen y comando
 DOCKER_ARGS+=( "$IMAGE" )
 DOCKER_ARGS+=( "${CMD[@]}" )
+
+echo "${DOCKER_ARGS[@]}"
 
 # Exec
 exec docker "${DOCKER_ARGS[@]}"
