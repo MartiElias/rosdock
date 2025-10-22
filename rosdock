@@ -8,7 +8,7 @@ ensure_local_config() {
   local cfg_dir="$PWD/.config/rosdock"
   local cfg_yml="$cfg_dir/config.yml"
   local ep_sh="$cfg_dir/entrypoint.sh"
-  local bashfile="$cfg_dir/bashfile.txt"
+  local bash_setup="$cfg_dir/bash_setup.txt"
 
   # crea carpeta si no existe
   mkdir -p "$cfg_dir"
@@ -48,7 +48,7 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-cat /rosdock/bashfile.txt >> ~/.bashrc
+cat /rosdock/bash_setup.txt >> ~/.bashrc
 # Ejecuta el comando recibido
 exec "$@"
 EOSH
@@ -56,11 +56,11 @@ EOSH
     chmod +x $ep_sh
   fi
 
-  if [[ ! -f "$bashfile" ]]; then
-    cat > "$bashfile" <<'EOSH'
+  if [[ ! -f "$bash_setup" ]]; then
+    cat > "$bash_setup" <<'EOSH'
 # soruce $ROSDOCK_WS/ros2_ws/install/setup.bash
 EOSH
-    echo "[rosdock] create $bashfile"
+    echo "[rosdock] create $bash_setup"
   fi
 }
 
