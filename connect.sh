@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Nombre del contenedor e imagen
-CONTAINER="ros2roscon_container"
-IMAGE="ros2roscon"
+CONTAINER="ros_container"
+IMAGE="ros"
 
 # ¿Existe el contenedor?
 if [ "$(docker ps -aq -f name=^${CONTAINER}$)" ]; then
