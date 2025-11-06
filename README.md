@@ -66,10 +66,12 @@ project_root/
      ├─ entrypoint.sh
      └─ bash_setup.txt
 ```
-
 ✅ No $HOME pollution
+
 ✅ No global install needed
+
 ✅ Just delete the folder to reset config
+
 🛠 Example config.yml
 ```bash
 default_image: ros:humble
