@@ -202,6 +202,7 @@ if [[ "$GPUS" == "1" ]]; then
   if command -v nvidia-smi >/dev/null 2>&1; then
     # NVIDIA (nvidia-container-toolkit)
     DOCKER_ARGS+=( --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all )
+    echo "[rosdock] NVIDIA GPU loaded"
 
   elif [[ -e /dev/kfd || -d /dev/dri ]]; then
     # AMD (ROCm runtime moderno)
@@ -215,6 +216,7 @@ if [[ "$GPUS" == "1" ]]; then
         --security-opt seccomp=unconfined
         -e AMD_VISIBLE_DEVICES="${AMD_VISIBLE_DEVICES:-all}"
       )
+      echo "[rosdock] AMD GPU loaded
     else
       echo "[rosdock] AMD GPU detected but 'amd' runtime not available; skipping GPU flags" >&2
     fi
