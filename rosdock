@@ -22,8 +22,8 @@ ensure_local_config() {
     name_val="${NAME:-ros}"
   else
     # ejemplos por defecto si no hubo argumentos
-    image_val="image_name"
-    root_val="work_dir"
+    image_val="ubuntu"
+    root_val="/work_dir"
     name_val="container_name"
   fi
 
@@ -64,14 +64,12 @@ EOSH
   fi
 }
 
-ensure_local_config
-
 # -----------------------------
-# Defaults (pueden venir de config.yml o CLI)
+# Default (arg, can come from config.yml or CLI)
 # -----------------------------
-IMAGE="ros:humble"
+IMAGE="ubuntu"
 ROOT="/work"
-NAME="ros"
+NAME="container_name"
 GPUS="0"             # "1" => --gpus all
 SUBCMD="run"         # run|attach
 EXTRA_ENVS=()
@@ -111,17 +109,21 @@ EOF
 }
 
 # -----------------------------
-# Cargar config YAML si hay yq
+# Load config YAML (if you have yq)
 # -----------------------------
 CONFIG_FILE="${XDG_CONFIG_HOME:-$PWD_ABS/.config}/rosdock/config.yml"
-echo ""
-echo $CONFIG_FILE
-echo ""
+
 if [[ -f "$CONFIG_FILE" ]] && have yq; then
+  echo "[rosdock] Loading config file: ${CONFIG_FILE}"
+
   IMAGE="$(yq -r '.default_image // "'"$IMAGE"'"' "$CONFIG_FILE")"
   ROOT="$(yq -r '.default_root // "'"$ROOT"'"' "$CONFIG_FILE")"
-  GPUS_VAL="$(yq -r '.gpus // "false"' "$CONFIG_FILE")"
-  [[ "$GPUS_VAL" == "true" ]] && GPUS="1"
+  GPUS_VAL="$(yq -r '.gpus // ""' "$CONFIG_FILE")"
+  if [[ "$GPUS_VAL" == "true" || "$GPUS_VAL" == "1" ]]; then
+    GPUS="1"
+  else
+    GPUS="0"
+  fi
   # Leer variables de entorno desde config.yml (si existen)
   if yq -e '.env' "$CONFIG_FILE" >/dev/null 2>&1; then
     while IFS="=" read -r key val; do
@@ -130,10 +132,6 @@ if [[ -f "$CONFIG_FILE" ]] && have yq; then
   fi
 
 fi
-
-echo ""
-echo $ROOT
-echo ""
 
 
 # -----------------------------
@@ -146,7 +144,14 @@ while [[ $# -gt 0 ]]; do
     --image=*) IMAGE="${1#*=}" ;;
     --root=*) ROOT="${1#*=}" ;;
     --name=*) NAME="${1#*=}" ;;
-    --gpus) GPUS="1" ;;
+    --gpus|--gpus=*)
+      val="${1#*=}"
+      if [[ "$val" == "$1" || -z "$val" || "$val" == "1" || "$val" == "true" ]]; then
+        GPUS="1"
+      else
+        GPUS="0"
+      fi
+      ;;
     --env) shift; [[ $# -gt 0 ]] || die "--env requiere KEY=VAL"; EXTRA_ENVS+=( -e "$1" ) ;;
     --env=*) EXTRA_ENVS+=( -e "${1#*=}" ) ;;
     --mount) shift; [[ $# -gt 0 ]] || die "--mount requiere spec"; EXTRA_MOUNTS+=( --mount "$1" ) ;;
@@ -156,6 +161,9 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+ensure_local_config
+
 
 CMD=( "$@" )
 [[ ${#CMD[@]} -eq 0 ]] && CMD=( /bin/bash )
@@ -187,15 +195,54 @@ DOCKER_ARGS=(
 DOCKER_ARGS+=( "${EXTRA_ENVS[@]}" )
 
 
-# GPUs
-[[ "$GPUS" == "1" ]] && DOCKER_ARGS+=( --gpus all )
+# GPUs (latest toolkits only: NVIDIA nvidia-container-toolkit, AMD ROCm runtime)
+if [[ "$GPUS" == "1" ]]; then
+  RUNTIMES_JSON="$(docker info --format '{{json .Runtimes}}' 2>/dev/null || echo '{}')"
+
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    # NVIDIA (nvidia-container-toolkit)
+    DOCKER_ARGS+=( --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all )
+
+  elif [[ -e /dev/kfd || -d /dev/dri ]]; then
+    # AMD (ROCm runtime moderno)
+    if grep -q '"amd"' <<<"$RUNTIMES_JSON"; then
+      DOCKER_ARGS+=(
+        --runtime=amd
+        --device=/dev/kfd
+        --device=/dev/dri
+        --group-add video
+        --group-add render
+        --security-opt seccomp=unconfined
+        -e AMD_VISIBLE_DEVICES="${AMD_VISIBLE_DEVICES:-all}"
+      )
+    else
+      echo "[rosdock] AMD GPU detected but 'amd' runtime not available; skipping GPU flags" >&2
+    fi
+
+  else
+    echo "[rosdock] GPU requested but no GPU detected" >&2
+  fi
+fi
+
 
 
 # Imagen y comando
 DOCKER_ARGS+=( "$IMAGE" )
 DOCKER_ARGS+=( "${CMD[@]}" )
 
-echo "${DOCKER_ARGS[@]}"
+echo ""
+# echo "${DOCKER_ARGS[@]}"
+
+# # Exporting variables
+# export ROSDOCK_CONTAINER=$NAME
+# export ROSDOCK_IMAGE=$IMAGE
+
+# echo ""
+# echo ""
+# echo $ROSDOCK_CONTAINER
+# echo ""
+# echo ""
+
 
 # Exec
 exec docker "${DOCKER_ARGS[@]}"
