@@ -216,7 +216,7 @@ if [[ "$GPUS" == "1" ]]; then
         --security-opt seccomp=unconfined
         -e AMD_VISIBLE_DEVICES="${AMD_VISIBLE_DEVICES:-all}"
       )
-      echo "[rosdock] AMD GPU loaded
+      echo "[rosdock] AMD GPU loaded"
     else
       echo "[rosdock] AMD GPU detected but 'amd' runtime not available; skipping GPU flags" >&2
     fi
