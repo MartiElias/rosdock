@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ARGC_ORIG=$#   # para saber si rosdock fue llamado con argumentos
+ARGC_ORIG=$#   # to know if rosdock was called with arguments
 PWD_ABS="$(pwd)"
 
 ensure_local_config() {
@@ -10,24 +10,24 @@ ensure_local_config() {
   local ep_sh="$cfg_dir/entrypoint.sh"
   local bash_setup="$cfg_dir/bash_setup.txt"
 
-  # crea carpeta si no existe
+  # create folder if it doesn't exist
   mkdir -p "$cfg_dir"
 
-  # decide valores a escribir en config.yml
+  # Values to write in config.yml
   local image_val root_val name_val
   if (( ARGC_ORIG > 0 )); then
-    # usar lo que haya quedado configurado por CLI/YAML (ya parseado)
+    # use config CLI/YAML
     image_val="${IMAGE:-ros:humble}"
     root_val="${ROOT:-/work}"
     name_val="${NAME:-ros}"
   else
-    # ejemplos por defecto si no hubo argumentos
+    # default values if no arguments were given
     image_val="ubuntu"
     root_val="/work_dir"
     name_val="container_name"
   fi
 
-  # crea config.yml si no existe
+  # create config.yml if it doesn't exist
   if [[ ! -f "$cfg_yml" ]]; then
     cat > "$cfg_yml" <<EOF
 # Local rosdock config (auto-generated)
@@ -47,7 +47,7 @@ EOF
     echo "[rosdock] created $cfg_yml"
   fi
 
-  # crea entrypoint.sh si no existe (plantilla mínima segura)
+  # create entrypoint.sh if it doesn't exist
   if [[ ! -f "$ep_sh" ]]; then
     cat > "$ep_sh" <<'EOSH'
 #!/usr/bin/env bash
@@ -90,30 +90,31 @@ die(){ echo "rosdock: $*" >&2; exit 1; }
 have(){ command -v "$1" >/dev/null 2>&1; }
 
 docker_ok(){
-  have docker || die "docker no está en PATH"
-  docker info >/dev/null 2>&1 || die "Docker daemon no responde"
+  have docker || die "docker is not on the PATH"
+  docker info >/dev/null 2>&1 || die "Docker daemon not responding"
 }
 
 usage(){
   cat <<EOF
-Uso: rosdock [opciones] [--] [CMD...]        (modo por defecto = run)
-     rosdock attach                           (intenta entrar a un contenedor existente)
+Usage: rosdock [options] [--] [CMD...]        (default mode = run)
+       rosdock attach                         (tries to attach to an existing container)
 
-Opciones:
-  --image=IMAGEN           (def: $IMAGE)
-  --root=PATH              raíz dentro del contenedor (def: $ROOT)
-  --name=NOMBRE            nombre del contenedor (def: rosdock-<carpeta>-<hash>)
-  --gpus                   añade --gpus all
-  --env KEY=VAL            añade variable de entorno (repetible)
-  --mount spec             añade --mount (repetible, formato docker --mount)
-  --device                 dispositivos a conectar
-  --group_add              grupo adicional a conectar, como video o audio
-  --verbose                muestra todo el comando ejecutado con docker
-  attach                   subcomando: adjunta a contenedor existente del proyecto
-  -h, --help               ayuda
+Options:
+  --image=IMAGE           (default: $IMAGE)
+  --root=PATH             root directory inside the container (default: $ROOT)
+  --name=NAME             container name (default: rosdock-<folder>-<hash>)
+  --gpus                  adds --gpus all
+  --env KEY=VAL            adds an environment variable (repeatable)
+  --mount spec             adds --mount (repeatable, Docker --mount format)
+  --device                 devices to connect
+  --group_add              additional group to add, such as video or audio
+  --verbose                prints the full docker command being executed
+  attach                   subcommand: attach to an existing project container
+  -h, --help               show this help message
 
-Ejemplos:
+Examples:
   rosdock --image=ros:humble --root=/work --name=ros_humble
+
 EOF
 }
 
@@ -136,21 +137,21 @@ if [[ -f "$CONFIG_FILE" ]] && have yq; then
     GPUS="0"
   fi
 
-  # env: mapa KEY: VAL
+  # env: map KEY: VAL
   if yq -e '.env' "$CONFIG_FILE" >/dev/null 2>&1; then
     while IFS="=" read -r key val; do
       [[ -n "$key" && -n "$val" ]] && EXTRA_ENVS+=( -e "$key=$val" )
     done < <(yq -r '.env | to_entries[] | "\(.key)=\(.value)"' "$CONFIG_FILE")
   fi
 
-    # device: lista
+    # device: list
   if yq -e '.device' "$CONFIG_FILE" >/dev/null 2>&1; then
     while IFS= read -r dev; do
       [[ -n "$dev" ]] && EXTRA_DEVICES+=( --device "$dev" )
     done < <(yq -r '.device[]' "$CONFIG_FILE")
   fi
 
-  # group_add: lista
+  # group_add: list
   if yq -e '.group_add' "$CONFIG_FILE" >/dev/null 2>&1; then
     while IFS= read -r grp; do
       [[ -n "$grp" ]] && EXTRA_GROUP_ADDS+=( --group-add "$grp" )
@@ -178,12 +179,12 @@ while [[ $# -gt 0 ]]; do
         GPUS="0"
       fi
       ;;
-    --env) shift; [[ $# -gt 0 ]] || die "--env requiere KEY=VAL"; EXTRA_ENVS+=( -e "$1" ) ;;
+    --env) shift; [[ $# -gt 0 ]] || die "--env requires KEY=VAL"; EXTRA_ENVS+=( -e "$1" ) ;;
     --env=*) EXTRA_ENVS+=( -e "${1#*=}" ) ;;
-    --mount) shift; [[ $# -gt 0 ]] || die "--mount requiere spec"; EXTRA_MOUNTS+=( --mount "$1" ) ;;
-    --device) shift; [[ $# -gt 0 ]] || die "--device requiere /dev/xxx"; EXTRA_DEVICES+=( --device "$1" ) ;;
+    --mount) shift; [[ $# -gt 0 ]] || die "--mount requires spec"; EXTRA_MOUNTS+=( --mount "$1" ) ;;
+    --device) shift; [[ $# -gt 0 ]] || die "--device requires /dev/xxx"; EXTRA_DEVICES+=( --device "$1" ) ;;
     --device=*) EXTRA_DEVICES+=( --device "${1#*=}" ) ;;
-    --group_add) shift; [[ $# -gt 0 ]] || die "--group_add requiere grupo o GID"; EXTRA_GROUP_ADDS+=( --group_add "$1" ) ;;
+    --group_add) shift; [[ $# -gt 0 ]] || die "--group_add requires group or GID"; EXTRA_GROUP_ADDS+=( --group_add "$1" ) ;;
     --group_add=*) EXTRA_GROUP_ADDS+=( --group_add "${1#*=}" ) ;;
     --verbose*) VERBOSE=1 ;;
     -h|--help) usage; exit 0 ;;
@@ -207,7 +208,7 @@ BASE="$(basename "$PWD_ABS")"
 echo "[rosdock] image=$IMAGE  root=$ROOT  name=$NAME"
 
 # -----------------------------
-# Preparar docker run args
+# Prepare docker run args
 # -----------------------------
 DOCKER_ARGS=(
   run -it --rm
@@ -222,9 +223,11 @@ DOCKER_ARGS=(
   --entrypoint /rosdock/entrypoint.sh
 )
 
-# Añadir variables de entorno extra del config.yml (idioma midelware)
+# Add ENV args
 DOCKER_ARGS+=( "${EXTRA_ENVS[@]}" )
+# Add DEVICE args
 DOCKER_ARGS+=( "${EXTRA_DEVICES[@]}" )
+# Add GROUP_ADD args
 DOCKER_ARGS+=( "${EXTRA_GROUP_ADDS[@]}" )
 
 
@@ -261,7 +264,7 @@ fi
 
 
 
-# Imagen y comando
+# Image and container
 DOCKER_ARGS+=( "$IMAGE" )
 DOCKER_ARGS+=( "${CMD[@]}" )
 
