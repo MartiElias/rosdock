@@ -31,12 +31,17 @@ ensure_local_config() {
   if [[ ! -f "$cfg_yml" ]]; then
     cat > "$cfg_yml" <<EOF
 # Local rosdock config (auto-generated)
-default_image: ${image_val}
-default_root: ${root_val}
+image_name: ${image_val}
+init_root: ${root_val}
+container_name: ${name_val}
 gpus: ${GPUS:-0}
 env:
   LANG: C.UTF-8
   RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+device:
+  - /dev/snd
+group_add:
+  - audio
 entrypoint_path: "./.config/rosdock/entrypoint.sh"
 EOF
     echo "[rosdock] created $cfg_yml"
@@ -73,6 +78,9 @@ NAME="container_name"
 GPUS="0"             # "1" => --gpus all
 SUBCMD="run"         # run|attach
 EXTRA_ENVS=()
+EXTRA_DEVICES=()
+EXTRA_GROUPS=()
+VERBOSE=0
 
 # -----------------------------
 # Helpers
@@ -98,13 +106,14 @@ Opciones:
   --gpus                   añade --gpus all
   --env KEY=VAL            añade variable de entorno (repetible)
   --mount spec             añade --mount (repetible, formato docker --mount)
+  --device                 dispositivos a conectar
+  --group_add              grupo adicional a conectar, como video o audio
+  --verbose                muestra todo el comando ejecutado con docker
   attach                   subcomando: adjunta a contenedor existente del proyecto
   -h, --help               ayuda
 
 Ejemplos:
-  rosdock --image=ros:humble --dir='*_ws'
-  rosdock --image=myimg --depth=2 --order=bottomup -- bash -lc "colcon build && bash"
-  rosdock attach
+  rosdock --image=ros:humble --root=/work --name=ros_humble
 EOF
 }
 
@@ -116,19 +125,36 @@ CONFIG_FILE="${XDG_CONFIG_HOME:-$PWD_ABS/.config}/rosdock/config.yml"
 if [[ -f "$CONFIG_FILE" ]] && have yq; then
   echo "[rosdock] Loading config file: ${CONFIG_FILE}"
 
-  IMAGE="$(yq -r '.default_image // "'"$IMAGE"'"' "$CONFIG_FILE")"
-  ROOT="$(yq -r '.default_root // "'"$ROOT"'"' "$CONFIG_FILE")"
+  IMAGE="$(yq -r '.image_name // "'"$IMAGE"'"' "$CONFIG_FILE")"
+  ROOT="$(yq -r '.init_root // "'"$ROOT"'"' "$CONFIG_FILE")"
+  NAME="$(yq -r '.container_name // "'"$NAME"'"' "$CONFIG_FILE")"
   GPUS_VAL="$(yq -r '.gpus // ""' "$CONFIG_FILE")"
+
   if [[ "$GPUS_VAL" == "true" || "$GPUS_VAL" == "1" ]]; then
     GPUS="1"
   else
     GPUS="0"
   fi
-  # Leer variables de entorno desde config.yml (si existen)
+
+  # env: mapa KEY: VAL
   if yq -e '.env' "$CONFIG_FILE" >/dev/null 2>&1; then
     while IFS="=" read -r key val; do
       [[ -n "$key" && -n "$val" ]] && EXTRA_ENVS+=( -e "$key=$val" )
     done < <(yq -r '.env | to_entries[] | "\(.key)=\(.value)"' "$CONFIG_FILE")
+  fi
+
+    # device: lista
+  if yq -e '.device' "$CONFIG_FILE" >/dev/null 2>&1; then
+    while IFS= read -r dev; do
+      [[ -n "$dev" ]] && EXTRA_DEVICES+=( --device "$dev" )
+    done < <(yq -r '.device[]' "$CONFIG_FILE")
+  fi
+
+  # group_add: lista
+  if yq -e '.group_add' "$CONFIG_FILE" >/dev/null 2>&1; then
+    while IFS= read -r grp; do
+      [[ -n "$grp" ]] && EXTRA_GROUP_ADDS+=( --group-add "$grp" )
+    done < <(yq -r '.group_add[]' "$CONFIG_FILE")
   fi
 
 fi
@@ -155,6 +181,11 @@ while [[ $# -gt 0 ]]; do
     --env) shift; [[ $# -gt 0 ]] || die "--env requiere KEY=VAL"; EXTRA_ENVS+=( -e "$1" ) ;;
     --env=*) EXTRA_ENVS+=( -e "${1#*=}" ) ;;
     --mount) shift; [[ $# -gt 0 ]] || die "--mount requiere spec"; EXTRA_MOUNTS+=( --mount "$1" ) ;;
+    --device) shift; [[ $# -gt 0 ]] || die "--device requiere /dev/xxx"; EXTRA_DEVICES+=( --device "$1" ) ;;
+    --device=*) EXTRA_DEVICES+=( --device "${1#*=}" ) ;;
+    --group_add) shift; [[ $# -gt 0 ]] || die "--group_add requiere grupo o GID"; EXTRA_GROUP_ADDS+=( --group_add "$1" ) ;;
+    --group_add=*) EXTRA_GROUP_ADDS+=( --group_add "${1#*=}" ) ;;
+    --verbose*) VERBOSE=1 ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     *) break ;;
@@ -193,6 +224,8 @@ DOCKER_ARGS=(
 
 # Añadir variables de entorno extra del config.yml (idioma midelware)
 DOCKER_ARGS+=( "${EXTRA_ENVS[@]}" )
+DOCKER_ARGS+=( "${EXTRA_DEVICES[@]}" )
+DOCKER_ARGS+=( "${EXTRA_GROUP_ADDS[@]}" )
 
 
 # GPUs (latest toolkits only: NVIDIA nvidia-container-toolkit, AMD ROCm runtime)
@@ -232,19 +265,11 @@ fi
 DOCKER_ARGS+=( "$IMAGE" )
 DOCKER_ARGS+=( "${CMD[@]}" )
 
+# verbose flag
 echo ""
-# echo "${DOCKER_ARGS[@]}"
-
-# # Exporting variables
-# export ROSDOCK_CONTAINER=$NAME
-# export ROSDOCK_IMAGE=$IMAGE
-
-# echo ""
-# echo ""
-# echo $ROSDOCK_CONTAINER
-# echo ""
-# echo ""
-
+if [[ "$VERBOSE" == "1" ]] then
+  echo "${DOCKER_ARGS[@]}"
+fi
 
 # Exec
 exec docker "${DOCKER_ARGS[@]}"
