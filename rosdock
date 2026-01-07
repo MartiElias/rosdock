@@ -203,7 +203,7 @@ while [[ $# -gt 0 ]]; do
     --device=*) EXTRA_DEVICES+=( --device "${1#*=}" ) ;;
     --group_add) shift; [[ $# -gt 0 ]] || die "--group_add requires group or GID"; EXTRA_GROUP_ADDS+=( --group_add "$1" ) ;;
     --group_add=*) EXTRA_GROUP_ADDS+=( --group_add "${1#*=}" ) ;;
-    --docker-args=*) DOCKER_ARGS_STR="${1#*=}" ;;
+    --docker_args=*) DOCKER_ARGS_STR="${1#*=}" ;;
     --verbose*) VERBOSE=1 ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
