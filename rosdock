@@ -3,6 +3,21 @@ set -euo pipefail
 ARGC_ORIG=$#   # to know if rosdock was called with arguments
 PWD_ABS="$(pwd)"
 
+docker_container_connect() {
+  CONTAINER=$NAME
+
+  if [ "$(docker ps -aq -f name=^${CONTAINER}$)" ]; then
+      if [ "$(docker ps -q -f name=^${CONTAINER}$)" ]; then
+          echo "The Container '$CONTAINER' is running. Connecting ..."
+          docker exec -it "$CONTAINER" /bin/bash
+      else
+          echo "The container '$CONTAINER' exist but it's stoped. Connecting ..."
+          docker start "$CONTAINER"
+          docker exec -it "$CONTAINER" /bin/bash
+      fi
+  fi
+}
+
 ensure_local_config() {
 
   local cfg_dir="$PWD/.config/rosdock"
@@ -80,6 +95,7 @@ SUBCMD="run"         # run|attach
 EXTRA_ENVS=()
 EXTRA_DEVICES=()
 EXTRA_GROUPS=()
+DOCKER_ARGS_STR=""
 VERBOSE=0
 
 # -----------------------------
@@ -104,13 +120,14 @@ Options:
   --root=PATH             root directory inside the container (default: $ROOT)
   --name=NAME             container name (default: rosdock-<folder>-<hash>)
   --gpus                  adds --gpus all
-  --env KEY=VAL            adds an environment variable (repeatable)
-  --mount spec             adds --mount (repeatable, Docker --mount format)
-  --device                 devices to connect
-  --group_add              additional group to add, such as video or audio
-  --verbose                prints the full docker command being executed
-  attach                   subcommand: attach to an existing project container
-  -h, --help               show this help message
+  --env KEY=VAL           adds an environment variable (repeatable)
+  --mount spec            adds --mount (repeatable, Docker --mount format)
+  --device                devices to connect
+  --group_add             additional group to add, such as video or audio
+  --docker_args           docker arguments
+  --verbose               prints the full docker command being executed
+  attach                  subcommand: attach to an existing project container
+  -h, --help              show this help message
 
 Examples:
   rosdock --image=ros:humble --root=/work --name=ros_humble
@@ -186,6 +203,7 @@ while [[ $# -gt 0 ]]; do
     --device=*) EXTRA_DEVICES+=( --device "${1#*=}" ) ;;
     --group_add) shift; [[ $# -gt 0 ]] || die "--group_add requires group or GID"; EXTRA_GROUP_ADDS+=( --group_add "$1" ) ;;
     --group_add=*) EXTRA_GROUP_ADDS+=( --group_add "${1#*=}" ) ;;
+    --docker-args=*) DOCKER_ARGS_STR="${1#*=}" ;;
     --verbose*) VERBOSE=1 ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
@@ -230,6 +248,13 @@ DOCKER_ARGS+=( "${EXTRA_DEVICES[@]}" )
 # Add GROUP_ADD args
 DOCKER_ARGS+=( "${EXTRA_GROUP_ADDS[@]}" )
 
+# Add extra docker args
+EXTRA_DOCKER_ARGS=()
+if [[ -n "$DOCKER_ARGS_STR" ]]; then
+  read -r -a EXTRA_DOCKER_ARGS <<< "$DOCKER_ARGS_STR"
+fi
+DOCKER_ARGS+=( "${EXTRA_DOCKER_ARGS[@]}" )
+
 
 # GPUs (latest toolkits only: NVIDIA nvidia-container-toolkit, AMD ROCm runtime)
 if [[ "$GPUS" == "1" ]]; then
@@ -273,6 +298,9 @@ echo ""
 if [[ "$VERBOSE" == "1" ]] then
   echo "${DOCKER_ARGS[@]}"
 fi
+
+# Check if the container exist
+docker_container_connect
 
 # Exec
 exec docker "${DOCKER_ARGS[@]}"
