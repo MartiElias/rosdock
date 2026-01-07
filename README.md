@@ -74,12 +74,17 @@ project_root/
 
 🛠 Example config.yml
 ```bash
-default_image: ros:humble
-default_root: /work
-gpus: false
+image_name: ubuntu
+init_root: /work_dir
+container_name: container_name
+gpus: 0
 env:
   LANG: C.UTF-8
   RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+device:
+  - /dev/snd
+group_add:
+  - audio
 entrypoint_path: "./.config/rosdock/entrypoint.sh"
 ```
 
@@ -109,9 +114,8 @@ rm -rf .config/rosdock
 📝 License
 
 To be decided (MIT or Apache-2.0 recommended)
-📌 Roadmap
 
-Automaticly connect each new terminal
+📌 Roadmap
 
 Detect apt installs in the container and save them in the image
 
