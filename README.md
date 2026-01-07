@@ -18,7 +18,6 @@
 | Auto-mount current folder into container | ✅ |
 | Optional NVIDIA / AMD GPU support | ✅ |
 | Auto-install `yq` if missing | ✅ |
-| No need to write a Dockerfile | ✅ |
 | No need for docker-compose | ✅ |
 | Works in any folder / any project | ✅ |
 
