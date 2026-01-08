@@ -2,7 +2,7 @@
 echo "Giving executable permissions to rosdock"
 chmod +x rosdock
 echo "Installing rosdock in /bin folder"
-sudo cp rosdock /bin/rosdock
+sudo cp rosdock /usr/local/bin/rosdock
 
 # Check exit status of last command
 if [ $? -eq 0 ]; then
