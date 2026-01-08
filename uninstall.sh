@@ -1,6 +1,6 @@
 # Uninstalling rosdock from /bin folder
 echo "Uninstalling rosdock from /bin"
-sudo rm /bin/rosdock
+sudo rm /usr/local/bin/rosdock
 
 # Check exit status of last command
 if [ $? -eq 0 ]; then
