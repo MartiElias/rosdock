@@ -112,7 +112,7 @@ rm -rf .config/rosdock
 
 📝 License
 
-To be decided (MIT or Apache-2.0 recommended)
+Apache-2.0
 
 📌 Roadmap
 
