@@ -1,8 +1,0 @@
-# Local rosdock config (auto-generated)
-default_image: ros:humble
-default_root: /work
-gpus: 0
-env:
-  LANG: C.UTF-8
-  RMW_IMPLEMENTATION: rmw_fastrtps_cpp
-entrypoint_path: "./.config/rosdock/entrypoint.sh"
