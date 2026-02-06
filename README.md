@@ -40,7 +40,7 @@ rosdock --image=ros:humble
 
 On first run, rosdock creates:
 ```bash
-.config/rosdock/
+.rosdock/
  ├─ config.yml
  ├─ entrypoint.sh
  └─ bash_setup.txt
@@ -60,7 +60,7 @@ AMD (ROCm)	/dev/kfd or /dev/dri	--runtime=amd + devices + groups
 Each project keeps its own config — nothing is stored globally:
 ```bash
 project_root/
- └─ .config/rosdock/
+ └─ .rosdock/
      ├─ config.yml
      ├─ entrypoint.sh
      └─ bash_setup.txt
@@ -84,19 +84,18 @@ device:
   - /dev/snd
 group_add:
   - audio
-entrypoint_path: "./.config/rosdock/entrypoint.sh"
 ```
 
 🧩 Adding workspace sourcing
 
-Edit .config/rosdock/bash_setup.txt:
+Edit .rosdock/bash_setup.txt:
 ```bash
 source /work/my_ws/install/setup.bash
 ```
 
 🗑 Reset / remove config
 ```bash
-rm -rf .config/rosdock
+rm -rf .rosdock
 ```
 ❓ Why not docker-compose?
 
