@@ -4,7 +4,7 @@ ARGC_ORIG=$#   # to know if the command was called with arguments
 PWD_ABS="$(pwd)"
 
 # Define global variables
-SNAME="easydock"
+SNAME="rosdock"
 CONFIG_FD_PATH=".$SNAME"
 CONFIG_FILE_NAME="config.yml"
 BASH_FILE="bash_setup.txt"
@@ -36,17 +36,19 @@ ensure_local_config() {
   mkdir -p "$cfg_dir"
 
   # Values to write in $CONFIG_FILE_NAME
-  local image_val root_val name_val
+  local image_val root_val name_val display_val
   if (( ARGC_ORIG > 0 )); then
     # use config CLI/YAML
     image_val="${IMAGE:-ros:humble}"
     root_val="${ROOT:-/work}"
     name_val="${NAME:-ros}"
+    display_val="${DISPLAY_EN:-1}"
   else
     # default values if no arguments were given
     image_val="ubuntu"
     root_val="/work_dir"
     name_val="container_name"
+    display_val="1"
   fi
 
   # create $CONFIG_FILE_NAME if it doesn't exist
@@ -54,9 +56,10 @@ ensure_local_config() {
     cat > "$cfg_yml" <<EOF
 # Local config (auto-generated)
 image_name: ${image_val}
-init_root: ${root_val}
+work_folder: ${root_val}
 container_name: ${name_val}
 gpus: ${GPUS:-0}
+display: ${display_val}
 env:
   LANG: C.UTF-8
   RMW_IMPLEMENTATION: rmw_fastrtps_cpp
@@ -113,7 +116,8 @@ EOSH
 IMAGE="ubuntu"
 ROOT="/work"
 NAME="container_name"
-GPUS="0"             
+GPUS="0"     
+DISPLAY_EN="1"        
 SUBCMD="run"         # run|attach
 EXTRA_ENVS=()
 EXTRA_DEVICES=()
@@ -143,6 +147,7 @@ Options:
   --root=PATH             root directory inside the container (default: $ROOT)
   --name=NAME             container name (default: $SNAME-<folder>-<hash>)
   --gpus                  adds --gpus all
+  --display               enable or disable display for GUI applications
   --env KEY=VAL           adds an environment variable (repeatable)
   --mount spec            adds --mount (repeatable, Docker --mount format)
   --device                devices to connect
@@ -167,7 +172,7 @@ if [[ -f "$CONFIG_FILE" ]] && have yq; then
   echo "[$SNAME] Loading config file: ${CONFIG_FILE}"
 
   IMAGE="$(yq -r '.image_name // "'"$IMAGE"'"' "$CONFIG_FILE")"
-  ROOT="$(yq -r '.init_root // "'"$ROOT"'"' "$CONFIG_FILE")"
+  ROOT="$(yq -r '.work_folder // "'"$ROOT"'"' "$CONFIG_FILE")"
   NAME="$(yq -r '.container_name // "'"$NAME"'"' "$CONFIG_FILE")"
   GPUS_VAL="$(yq -r '.gpus // ""' "$CONFIG_FILE")"
 
@@ -175,6 +180,13 @@ if [[ -f "$CONFIG_FILE" ]] && have yq; then
     GPUS="1"
   else
     GPUS="0"
+  fi
+
+  DISPLAY_VAL="$(yq -r '.display // ""' "$CONFIG_FILE")"
+  if [[ "$DISPLAY_VAL" == "true" || "$DISPLAY_VAL" == "1" || "$DISPLAY_VAL" == "enable" ]]; then
+    DISPLAY_EN="1"
+  else
+    DISPLAY_EN="0"
   fi
 
   # env: map KEY: VAL
@@ -219,6 +231,15 @@ while [[ $# -gt 0 ]]; do
         GPUS="0"
       fi
       ;;
+    --display|--display=*)
+      val="${1#*=}"
+      if [[ "$val" == "$1" || -z "$val" || "$val" == "1" || "$val" == "true" || "$val" == "enable" ]]; then
+        DISPLAY_EN="1"
+      else
+        DISPLAY_EN="0"
+      fi
+      ;;
+
     --env) shift; [[ $# -gt 0 ]] || die "--env requires KEY=VAL"; EXTRA_ENVS+=( -e "$1" ) ;;
     --env=*) EXTRA_ENVS+=( -e "${1#*=}" ) ;;
     --mount) shift; [[ $# -gt 0 ]] || die "--mount requires spec"; EXTRA_MOUNTS+=( --mount "$1" ) ;;
@@ -254,15 +275,18 @@ echo "[$SNAME] image=$IMAGE  root=$ROOT  name=$NAME"
 DOCKER_ARGS=(
   run -it --rm
   --network host
-  -e DISPLAY=${DISPLAY}
   -e TERM="$TERM" 
   -e COLORTERM="${COLORTERM:-truecolor}"
-  -v /tmp/.X11-unix:/tmp/.X11-unix:rw
   --name "$NAME"
   --mount "type=bind,src=$PWD_ABS,dst=$ROOT"
   -v $PWD_ABS/$CONFIG_FD_PATH:/$SNAME
   --entrypoint /$SNAME/$ENTRYPOINT_FILE
 )
+
+if [[ "$DISPLAY_EN" == "1" ]]; then
+  DOCKER_ARGS+=( -e "DISPLAY=${DISPLAY}" -v /tmp/.X11-unix:/tmp/.X11-unix:rw )
+fi
+
 
 # Add ENV args
 DOCKER_ARGS+=( "${EXTRA_ENVS[@]}" )
