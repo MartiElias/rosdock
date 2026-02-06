@@ -32,6 +32,21 @@
 
 ---
 
+---
+
+## 🛠 Setup
+
+To install rosdock, clone the repository and run the installation script:
+
+```bash
+git clone https://github.com/MartiElias/rosdock.git
+cd rosdock
+./install.sh
+```
+This will install rosdock system-wide, making it available from any directory.
+
+---
+
 ## 🚀 Quick start
 
 ```bash
