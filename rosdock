@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ARGC_ORIG=$#   # to know if rosdock was called with arguments
+ARGC_ORIG=$#   # to know if the command was called with arguments
 PWD_ABS="$(pwd)"
+
+# Define global variables
+SNAME="easydock"
+CONFIG_FD_PATH=".$SNAME"
+CONFIG_FILE_NAME="config.yml"
+BASH_FILE="bash_setup.txt"
+ENTRYPOINT_FILE="entrypoint.sh"
+
 
 docker_container_connect() {
   CONTAINER=$NAME
@@ -19,16 +27,15 @@ docker_container_connect() {
 }
 
 ensure_local_config() {
-
-  local cfg_dir="$PWD/.config/rosdock"
-  local cfg_yml="$cfg_dir/config.yml"
-  local ep_sh="$cfg_dir/entrypoint.sh"
-  local bash_setup="$cfg_dir/bash_setup.txt"
+  local cfg_dir="$PWD/$CONFIG_FD_PATH"
+  local cfg_yml="$cfg_dir/$CONFIG_FILE_NAME"
+  local ep_sh="$cfg_dir/$ENTRYPOINT_FILE"
+  local bash_setup="$cfg_dir/$BASH_FILE"
 
   # create folder if it doesn't exist
   mkdir -p "$cfg_dir"
 
-  # Values to write in config.yml
+  # Values to write in $CONFIG_FILE_NAME
   local image_val root_val name_val
   if (( ARGC_ORIG > 0 )); then
     # use config CLI/YAML
@@ -42,10 +49,10 @@ ensure_local_config() {
     name_val="container_name"
   fi
 
-  # create config.yml if it doesn't exist
+  # create $CONFIG_FILE_NAME if it doesn't exist
   if [[ ! -f "$cfg_yml" ]]; then
     cat > "$cfg_yml" <<EOF
-# Local rosdock config (auto-generated)
+# Local config (auto-generated)
 image_name: ${image_val}
 init_root: ${root_val}
 container_name: ${name_val}
@@ -57,40 +64,56 @@ device:
   - /dev/snd
 group_add:
   - audio
-entrypoint_path: "./.config/rosdock/entrypoint.sh"
 EOF
-    echo "[rosdock] created $cfg_yml"
+    echo "[$SNAME] created $cfg_yml"
   fi
 
-  # create entrypoint.sh if it doesn't exist
+  # create $ENTRYPOINT_FILE if it doesn't exist
   if [[ ! -f "$ep_sh" ]]; then
-    cat > "$ep_sh" <<'EOSH'
+    cat > "$ep_sh" <<EOSH
 #!/usr/bin/env bash
 set -euo pipefail
 
-cat /rosdock/bash_setup.txt >> ~/.bashrc
-# Ejecuta el comando recibido
-exec "$@"
+# Save bash_history to the $SNAME Folder
+cat >> ~/.bashrc <<'EOF'
+# Historial más fiable en contenedores/terminales
+shopt -s histappend
+export HISTFILE="\$HOME/.bash_history"
+export HISTSIZE=10000
+export HISTFILESIZE=20000
+
+# In each prompt, add the new HISTFILE and reload the other shells
+PROMPT_COMMAND='history -a; history -n'
+
+# On Exit: output the history 
+trap 'history -a; history -w; cp "\$HISTFILE" /$SNAME/bash_history 2>/dev/null || true' EXIT
+EOF
+
+# Copy bash_setup lines
+cat "/$SNAME/${BASH_FILE}" >> ~/.bashrc
+
+# Run the given command
+exec "\$@"
 EOSH
-    echo "[rosdock] create $ep_sh"
+    echo "[$SNAME] create $ep_sh"
     chmod +x $ep_sh
   fi
 
   if [[ ! -f "$bash_setup" ]]; then
     cat > "$bash_setup" <<'EOSH'
-# soruce $ROSDOCK_WS/ros2_ws/install/setup.bash
+# soruce /work/ros2_ws/install/setup.bash
 EOSH
-    echo "[rosdock] create $bash_setup"
+    echo "[$SNAME] create $bash_setup"
   fi
 }
 
 # -----------------------------
-# Default (arg, can come from config.yml or CLI)
+# Default (arg, can come from $CONFIG_FILE_NAME or CLI)
 # -----------------------------
 IMAGE="ubuntu"
 ROOT="/work"
 NAME="container_name"
-GPUS="0"             # "1" => --gpus all
+GPUS="0"             
 SUBCMD="run"         # run|attach
 EXTRA_ENVS=()
 EXTRA_DEVICES=()
@@ -101,7 +124,7 @@ VERBOSE=0
 # -----------------------------
 # Helpers
 # -----------------------------
-die(){ echo "rosdock: $*" >&2; exit 1; }
+die(){ echo "$SNAME: $*" >&2; exit 1; }
 
 have(){ command -v "$1" >/dev/null 2>&1; }
 
@@ -112,13 +135,13 @@ docker_ok(){
 
 usage(){
   cat <<EOF
-Usage: rosdock [options] [--] [CMD...]        (default mode = run)
-       rosdock attach                         (tries to attach to an existing container)
+Usage: $SNAME [options] [--] [CMD...]        (default mode = run)
+       $SNAME attach                         (tries to attach to an existing container)
 
 Options:
   --image=IMAGE           (default: $IMAGE)
   --root=PATH             root directory inside the container (default: $ROOT)
-  --name=NAME             container name (default: rosdock-<folder>-<hash>)
+  --name=NAME             container name (default: $SNAME-<folder>-<hash>)
   --gpus                  adds --gpus all
   --env KEY=VAL           adds an environment variable (repeatable)
   --mount spec            adds --mount (repeatable, Docker --mount format)
@@ -130,7 +153,7 @@ Options:
   -h, --help              show this help message
 
 Examples:
-  rosdock --image=ros:humble --root=/work --name=ros_humble
+  $SNAME --image=ros:humble --root=/work --name=ros_humble
 
 EOF
 }
@@ -138,10 +161,10 @@ EOF
 # -----------------------------
 # Load config YAML (if you have yq)
 # -----------------------------
-CONFIG_FILE="${XDG_CONFIG_HOME:-$PWD_ABS/.config}/rosdock/config.yml"
+CONFIG_FILE="${XDG_CONFIG_HOME:-$PWD_ABS}/$CONFIG_FD_PATH/$CONFIG_FILE_NAME"
 
 if [[ -f "$CONFIG_FILE" ]] && have yq; then
-  echo "[rosdock] Loading config file: ${CONFIG_FILE}"
+  echo "[$SNAME] Loading config file: ${CONFIG_FILE}"
 
   IMAGE="$(yq -r '.image_name // "'"$IMAGE"'"' "$CONFIG_FILE")"
   ROOT="$(yq -r '.init_root // "'"$ROOT"'"' "$CONFIG_FILE")"
@@ -221,9 +244,9 @@ CMD=( "$@" )
 docker_ok
 
 BASE="$(basename "$PWD_ABS")"
-[[ -z "$NAME" ]] && NAME="rosdock-${BASE}-${HASH}"
+[[ -z "$NAME" ]] && NAME="$SNAME-${BASE}-${HASH}"
 
-echo "[rosdock] image=$IMAGE  root=$ROOT  name=$NAME"
+echo "[$SNAME] image=$IMAGE  root=$ROOT  name=$NAME"
 
 # -----------------------------
 # Prepare docker run args
@@ -237,8 +260,8 @@ DOCKER_ARGS=(
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw
   --name "$NAME"
   --mount "type=bind,src=$PWD_ABS,dst=$ROOT"
-  -v $PWD_ABS/.config/rosdock:/rosdock
-  --entrypoint /rosdock/entrypoint.sh
+  -v $PWD_ABS/$CONFIG_FD_PATH:/$SNAME
+  --entrypoint /$SNAME/$ENTRYPOINT_FILE
 )
 
 # Add ENV args
@@ -263,7 +286,7 @@ if [[ "$GPUS" == "1" ]]; then
   if command -v nvidia-smi >/dev/null 2>&1; then
     # NVIDIA (nvidia-container-toolkit)
     DOCKER_ARGS+=( --gpus all -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=all )
-    echo "[rosdock] NVIDIA GPU loaded"
+    echo "[$SNAME] NVIDIA GPU loaded"
 
   elif [[ -e /dev/kfd || -d /dev/dri ]]; then
     # AMD (ROCm runtime moderno)
@@ -277,13 +300,13 @@ if [[ "$GPUS" == "1" ]]; then
         --security-opt seccomp=unconfined
         -e AMD_VISIBLE_DEVICES="${AMD_VISIBLE_DEVICES:-all}"
       )
-      echo "[rosdock] AMD GPU loaded"
+      echo "[$SNAME] AMD GPU loaded"
     else
-      echo "[rosdock] AMD GPU detected but 'amd' runtime not available; skipping GPU flags" >&2
+      echo "[$SNAME] AMD GPU detected but 'amd' runtime not available; skipping GPU flags" >&2
     fi
 
   else
-    echo "[rosdock] GPU requested but no GPU detected" >&2
+    echo "[$SNAME] GPU requested but no GPU detected" >&2
   fi
 fi
 
