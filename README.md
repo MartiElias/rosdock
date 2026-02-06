@@ -5,7 +5,7 @@
 ---
 
 ## 🚧 Status  
-⚠️ **Under active development** — APIs may change.
+⚠️ **Under active development**
 
 ---
 
@@ -14,7 +14,7 @@
 | Feature | Supported |
 |---------|-----------|
 | Run ROS 2 inside Docker like a normal shell | ✅ |
-| Per-project automatic config (`.config/rosdock/`) | ✅ |
+| Per-project automatic config (`.rosdock/`) | ✅ |
 | Auto-mount current folder into container | ✅ |
 | Optional NVIDIA / AMD GPU support | ✅ |
 | Auto-install `yq` if missing | ✅ |
