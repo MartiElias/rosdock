@@ -20,6 +20,7 @@
 | Auto-install `yq` if missing | ✅ |
 | No need for docker-compose | ✅ |
 | Works in any folder / any project | ✅ |
+| Automatic X11 / Wayland GUI forwarding | ✅ |
 
 ---
 
@@ -41,12 +42,26 @@ rosdock --image=ros:humble
 On first run, rosdock creates:
 ```bash
 .rosdock/
+ ├─ bash_history
  ├─ config.yml
  ├─ entrypoint.sh
  └─ bash_setup.txt
 ```
 
 Next runs reuse that config automatically.
+
+🖥 GUI / Display support (X11 & Wayland)
+
+rosdock can automatically enable GUI support for ROS applications
+such as **rviz2**, **rqt**, **gazebo**, or custom Qt / GTK tools.
+```bash
+rosdock --display=1
+```
+Disable display is useful for SSH sessions.
+```bash
+rosdock --display=0
+```
+
 🖥 GPU support
 ```bash
 rosdock --gpus=1
@@ -61,6 +76,7 @@ Each project keeps its own config — nothing is stored globally:
 ```bash
 project_root/
  └─ .rosdock/
+     ├─ bash_history
      ├─ config.yml
      ├─ entrypoint.sh
      └─ bash_setup.txt
@@ -74,9 +90,10 @@ project_root/
 🛠 Example config.yml
 ```bash
 image_name: ubuntu
-init_root: /work_dir
+work_folder: /work_dir
 container_name: container_name
 gpus: 0
+display: 1
 env:
   LANG: C.UTF-8
   RMW_IMPLEMENTATION: rmw_fastrtps_cpp
