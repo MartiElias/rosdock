@@ -1,6 +1,6 @@
 # 🐋 rosdock  
 **Portable ROS 2 development made simple**  
-`rosdock` lets you use Docker as if it were your native ROS 2 environment — no Dockerfiles, no compose files, no setup overhead.
+`rosdock` lets you use Docker as if it were your native ROS 2 environment — no compose files, no setup overhead.
 
 ---
 
