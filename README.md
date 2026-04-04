@@ -48,6 +48,9 @@ This will install rosdock system-wide, making it available from any directory.
 ---
 
 ## 🚀 Quick start
+The workflow of rosdock focuses on bringing your current project folder into the Docker container automatically. The folder from which rosdock is executed will be mounted inside the container at the path defined in **work_folder** in the configuration file.
+
+⚠️ Important: rosdock must be executed from the project directory (not using a relative path to another folder).
 
 ```bash
 cd my_ros_project/
@@ -104,16 +107,31 @@ project_root/
 
 🛠 Example config.yml
 ```bash
+# Docker image to use
 image_name: ubuntu
+
+# Path inside the container where your host folder will be mounted
 work_folder: /work_dir
+
+# Name of the container
 container_name: container_name
+
+# GPU support (0 = disabled, 1 = enabled)
 gpus: 0
+
+# Display / GUI support (0 = disabled, 1 = enabled)
 display: 1
+
+# Environment variables
 env:
   LANG: C.UTF-8
   RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+
+# Devices (audio by default)
 device:
   - /dev/snd
+
+# Groups (audio by default)
 group_add:
   - audio
 ```
