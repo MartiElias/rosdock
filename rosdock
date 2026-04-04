@@ -315,17 +315,13 @@ if [[ "$GPUS" == "1" ]]; then
     # AMD (ROCm runtime moderno)
     if grep -q '"amd"' <<<"$RUNTIMES_JSON"; then
       DOCKER_ARGS+=(
-        --runtime=amd
         --device=/dev/kfd
         --device=/dev/dri
-        --group-add video
-        --group-add render
         --security-opt seccomp=unconfined
-        -e AMD_VISIBLE_DEVICES="${AMD_VISIBLE_DEVICES:-all}"
       )
       echo "[$SNAME] AMD GPU loaded"
     else
-      echo "[$SNAME] AMD GPU detected but 'amd' runtime not available; skipping GPU flags" >&2
+      echo "[$SNAME] AMD GPU detected, error loading." >&2
     fi
 
   else
