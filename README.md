@@ -4,11 +4,6 @@
 
 ---
 
-## 🚧 Status  
-⚠️ **Under active development**
-
----
-
 ## ✨ Features
 
 | Feature | Supported |
