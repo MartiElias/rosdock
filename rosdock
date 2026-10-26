@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ARGC_ORIG=$#   # to know if the command was called with arguments
 PWD_ABS="$(pwd)"
 
 # Define global variables
 SNAME="rosdock"
+AUTO_REMOVE="1"
 CONFIG_FD_PATH=".$SNAME"
 CONFIG_FILE_NAME="config.yml"
 BASH_FILE="bash_setup.txt"
@@ -12,18 +12,15 @@ ENTRYPOINT_FILE="entrypoint.sh"
 
 
 docker_container_connect() {
-  CONTAINER=$NAME
+  local running
+  running="$(docker inspect --type container --format '{{.State.Running}}' "$NAME" 2>/dev/null)" || return 1
 
-  if [ "$(docker ps -aq -f name=^${CONTAINER}$)" ]; then
-      if [ "$(docker ps -q -f name=^${CONTAINER}$)" ]; then
-          echo "The Container '$CONTAINER' is running. Connecting ..."
-          docker exec -it "$CONTAINER" /bin/bash
-      else
-          echo "The container '$CONTAINER' exist but it's stoped. Connecting ..."
-          docker start "$CONTAINER"
-          docker exec -it "$CONTAINER" /bin/bash
-      fi
+  if [[ "$running" != "true" ]]; then
+    echo "The container '$NAME' is stopped. Starting ..."
+    docker start "$NAME" || die "Could not start container '$NAME'"
   fi
+  echo "Connecting to container '$NAME' ..."
+  exec docker exec -it "$NAME" /bin/bash
 }
 
 ensure_local_config() {
@@ -35,38 +32,32 @@ ensure_local_config() {
   # create folder if it doesn't exist
   mkdir -p "$cfg_dir"
 
-  # Values to write in $CONFIG_FILE_NAME
-  local image_val root_val name_val display_val
-  if (( ARGC_ORIG > 0 )); then
-    # use config CLI/YAML
-    image_val="${IMAGE:-ros:humble}"
-    root_val="${ROOT:-/work}"
-    name_val="${NAME:-ros}"
-    display_val="${DISPLAY_EN:-1}"
-  else
-    # default values if no arguments were given
-    image_val="ubuntu"
-    root_val="/work_dir"
-    name_val="container_name"
-    display_val="1"
+  local audio_devices="[]" audio_groups="[]"
+  if [[ -e /dev/snd ]]; then
+    audio_devices="[/dev/snd]"
+    audio_groups="[audio]"
   fi
 
   # create $CONFIG_FILE_NAME if it doesn't exist
   if [[ ! -f "$cfg_yml" ]]; then
     cat > "$cfg_yml" <<EOF
 # Local config (auto-generated)
-image_name: ${image_val}
-work_folder: ${root_val}
-container_name: ${name_val}
+image_name: ${IMAGE}
+work_folder: ${ROOT}
+container_name: ${NAME}
 gpus: ${GPUS:-0}
-display: ${display_val}
+display: ${DISPLAY_EN}
 env:
   LANG: C.UTF-8
   RMW_IMPLEMENTATION: rmw_fastrtps_cpp
-device:
-  - /dev/snd
-group_add:
-  - audio
+  # On systems with integrated graphics and a dedicated NVIDIA GPU,
+  # we recommend uncommenting these variables so applications render with NVIDIA.
+  # Otherwise, NVIDIA may be detected but applications may still use integrated graphics.
+  # Also enable GPU access with gpus: 1 (outside env) or --gpus=1.
+  # __NV_PRIME_RENDER_OFFLOAD: "1"
+  # __GLX_VENDOR_LIBRARY_NAME: nvidia
+device: ${audio_devices}
+group_add: ${audio_groups}
 EOF
     echo "[$SNAME] created $cfg_yml"
   fi
@@ -79,17 +70,16 @@ set -euo pipefail
 
 # Save bash_history to the $SNAME Folder
 cat >> ~/.bashrc <<'EOF'
-# Historial más fiable en contenedores/terminales
+# More reliable track record in containers/terminals
 shopt -s histappend
-export HISTFILE="\$HOME/.bash_history"
+export HISTFILE="/$SNAME/bash_history"
 export HISTSIZE=10000
 export HISTFILESIZE=20000
 
 # In each prompt, add the new HISTFILE and reload the other shells
 PROMPT_COMMAND='history -a; history -n'
 
-# On Exit: output the history 
-trap 'history -a; history -w; cp "\$HISTFILE" /$SNAME/bash_history 2>/dev/null || true' EXIT
+trap 'history -a' EXIT
 EOF
 
 # Copy bash_setup lines
@@ -99,12 +89,12 @@ cat "/$SNAME/${BASH_FILE}" >> ~/.bashrc
 exec "\$@"
 EOSH
     echo "[$SNAME] create $ep_sh"
-    chmod +x $ep_sh
+    chmod +x "$ep_sh"
   fi
 
   if [[ ! -f "$bash_setup" ]]; then
     cat > "$bash_setup" <<'EOSH'
-# soruce /work/ros2_ws/install/setup.bash
+# source /work/ros2_ws/install/setup.bash
 EOSH
     echo "[$SNAME] create $bash_setup"
   fi
@@ -121,7 +111,8 @@ DISPLAY_EN="1"
 SUBCMD="run"         # run|attach
 EXTRA_ENVS=()
 EXTRA_DEVICES=()
-EXTRA_GROUPS=()
+EXTRA_GROUP_ADDS=()
+EXTRA_MOUNTS=()
 DOCKER_ARGS_STR=""
 VERBOSE=0
 
@@ -144,8 +135,9 @@ Usage: $SNAME [options] [--] [CMD...]        (default mode = run)
 
 Options:
   --image=IMAGE           (default: $IMAGE)
+  --rm=0|1                remove container on exit (default: 1)
   --root=PATH             root directory inside the container (default: $ROOT)
-  --name=NAME             container name (default: $SNAME-<folder>-<hash>)
+  --name=NAME             container name (default: $NAME)
   --gpus                  adds --gpus all
   --display               enable or disable display for GUI applications
   --env KEY=VAL           adds an environment variable (repeatable)
@@ -166,9 +158,10 @@ EOF
 # -----------------------------
 # Load config YAML (if you have yq)
 # -----------------------------
-CONFIG_FILE="${XDG_CONFIG_HOME:-$PWD_ABS}/$CONFIG_FD_PATH/$CONFIG_FILE_NAME"
+CONFIG_FILE="$PWD_ABS/$CONFIG_FD_PATH/$CONFIG_FILE_NAME"
 
-if [[ -f "$CONFIG_FILE" ]] && have yq; then
+if [[ -f "$CONFIG_FILE" ]]; then
+  have yq || die "yq is required to read $CONFIG_FILE; run install.sh first"
   echo "[$SNAME] Loading config file: ${CONFIG_FILE}"
 
   IMAGE="$(yq -r '.image_name // "'"$IMAGE"'"' "$CONFIG_FILE")"
@@ -191,23 +184,26 @@ if [[ -f "$CONFIG_FILE" ]] && have yq; then
 
   # env: map KEY: VAL
   if yq -e '.env' "$CONFIG_FILE" >/dev/null 2>&1; then
+    env_values="$(yq -r '.env | to_entries[] | "\(.key)=\(.value)"' "$CONFIG_FILE")"
     while IFS="=" read -r key val; do
-      [[ -n "$key" && -n "$val" ]] && EXTRA_ENVS+=( -e "$key=$val" )
-    done < <(yq -r '.env | to_entries[] | "\(.key)=\(.value)"' "$CONFIG_FILE")
+      if [[ -n "$key" ]]; then EXTRA_ENVS+=( -e "$key=$val" ); fi
+    done <<< "$env_values"
   fi
 
     # device: list
   if yq -e '.device' "$CONFIG_FILE" >/dev/null 2>&1; then
+    device_values="$(yq -r '.device[]' "$CONFIG_FILE")"
     while IFS= read -r dev; do
-      [[ -n "$dev" ]] && EXTRA_DEVICES+=( --device "$dev" )
-    done < <(yq -r '.device[]' "$CONFIG_FILE")
+      if [[ -n "$dev" ]]; then EXTRA_DEVICES+=( --device "$dev" ); fi
+    done <<< "$device_values"
   fi
 
   # group_add: list
   if yq -e '.group_add' "$CONFIG_FILE" >/dev/null 2>&1; then
+    group_values="$(yq -r '.group_add[]' "$CONFIG_FILE")"
     while IFS= read -r grp; do
-      [[ -n "$grp" ]] && EXTRA_GROUP_ADDS+=( --group-add "$grp" )
-    done < <(yq -r '.group_add[]' "$CONFIG_FILE")
+      if [[ -n "$grp" ]]; then EXTRA_GROUP_ADDS+=( --group-add "$grp" ); fi
+    done <<< "$group_values"
   fi
 
 fi
@@ -221,6 +217,9 @@ if [[ $# -gt 0 && "$1" == "attach" ]]; then SUBCMD="attach"; shift; fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --image=*) IMAGE="${1#*=}" ;;
+    --rm|--rm=1|--rm=true) AUTO_REMOVE="1" ;;
+    --rm=0|--rm=false) AUTO_REMOVE="0" ;;
+    --rm=*) die "--rm requires 0, 1, false or true" ;;
     --root=*) ROOT="${1#*=}" ;;
     --name=*) NAME="${1#*=}" ;;
     --gpus|--gpus=*)
@@ -244,8 +243,8 @@ while [[ $# -gt 0 ]]; do
     --mount) shift; [[ $# -gt 0 ]] || die "--mount requires spec"; EXTRA_MOUNTS+=( --mount "$1" ) ;;
     --device) shift; [[ $# -gt 0 ]] || die "--device requires /dev/xxx"; EXTRA_DEVICES+=( --device "$1" ) ;;
     --device=*) EXTRA_DEVICES+=( --device "${1#*=}" ) ;;
-    --group_add) shift; [[ $# -gt 0 ]] || die "--group_add requires group or GID"; EXTRA_GROUP_ADDS+=( --group_add "$1" ) ;;
-    --group_add=*) EXTRA_GROUP_ADDS+=( --group_add "${1#*=}" ) ;;
+    --group_add) shift; [[ $# -gt 0 ]] || die "--group_add requires group or GID"; EXTRA_GROUP_ADDS+=( --group-add "$1" ) ;;
+    --group_add=*) EXTRA_GROUP_ADDS+=( --group-add "${1#*=}" ) ;;
     --docker_args=*) DOCKER_ARGS_STR="${1#*=}" ;;
     --verbose*) VERBOSE=1 ;;
     -h|--help) usage; exit 0 ;;
@@ -255,16 +254,18 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-ensure_local_config
-
-
 CMD=( "$@" )
 [[ ${#CMD[@]} -eq 0 ]] && CMD=( /bin/bash )
 
 docker_ok
 
-BASE="$(basename "$PWD_ABS")"
-[[ -z "$NAME" ]] && NAME="$SNAME-${BASE}-${HASH}"
+[[ -n "$NAME" ]] || die "container name must not be empty"
+
+if ! docker_container_connect; then
+  [[ "$SUBCMD" != "attach" ]] || die "Container '$NAME' does not exist"
+fi
+
+ensure_local_config
 
 echo "[$SNAME] image=$IMAGE  root=$ROOT  name=$NAME"
 
@@ -272,20 +273,25 @@ echo "[$SNAME] image=$IMAGE  root=$ROOT  name=$NAME"
 # Prepare docker run args
 # -----------------------------
 DOCKER_ARGS=(
-  run -it --rm
+  run -it
   --network host
-  -e TERM="$TERM" 
+  -e TERM="${TERM:-xterm}"
   -e COLORTERM="${COLORTERM:-truecolor}"
   --name "$NAME"
   --mount "type=bind,src=$PWD_ABS,dst=$ROOT"
-  -v $PWD_ABS/$CONFIG_FD_PATH:/$SNAME
+  -v "$PWD_ABS/$CONFIG_FD_PATH:/$SNAME"
   --entrypoint /$SNAME/$ENTRYPOINT_FILE
 )
 
-if [[ "$DISPLAY_EN" == "1" ]]; then
-  DOCKER_ARGS+=( -e "DISPLAY=${DISPLAY}" -v /tmp/.X11-unix:/tmp/.X11-unix:rw )
+# Add --rm config
+if [[ "$AUTO_REMOVE" == "1" ]]; then
+  DOCKER_ARGS+=( --rm )
 fi
 
+# Add Display config
+if [[ "$DISPLAY_EN" == "1" && -n "${DISPLAY:-}" ]]; then
+  DOCKER_ARGS+=( -e "DISPLAY=${DISPLAY}" -v /tmp/.X11-unix:/tmp/.X11-unix:rw )
+fi
 
 # Add ENV args
 DOCKER_ARGS+=( "${EXTRA_ENVS[@]}" )
@@ -293,6 +299,8 @@ DOCKER_ARGS+=( "${EXTRA_ENVS[@]}" )
 DOCKER_ARGS+=( "${EXTRA_DEVICES[@]}" )
 # Add GROUP_ADD args
 DOCKER_ARGS+=( "${EXTRA_GROUP_ADDS[@]}" )
+# Add MOUNT args
+DOCKER_ARGS+=( "${EXTRA_MOUNTS[@]}" )
 
 # Add extra docker args
 EXTRA_DOCKER_ARGS=()
@@ -336,13 +344,24 @@ DOCKER_ARGS+=( "$IMAGE" )
 DOCKER_ARGS+=( "${CMD[@]}" )
 
 # verbose flag
-echo ""
-if [[ "$VERBOSE" == "1" ]] then
-  echo "${DOCKER_ARGS[@]}"
-fi
+if [[ "$VERBOSE" == "1" ]]; then
+  printf '\ndocker %q' "${DOCKER_ARGS[0]}"
 
-# Check if the container exist
-docker_container_connect
+  for ((i=1; i<${#DOCKER_ARGS[@]}; i++)); do
+    printf ' \\\n  %q' "${DOCKER_ARGS[i]}"
+
+    case "${DOCKER_ARGS[i]}" in
+      -e|-v|--network|--name|--mount|--entrypoint|--device|--group-add|--gpus|--security-opt)
+        if (( i + 1 < ${#DOCKER_ARGS[@]} )); then
+          i=$((i + 1))
+          printf ' %q' "${DOCKER_ARGS[i]}"
+        fi
+        ;;
+    esac
+  done
+
+  printf '\n'
+fi
 
 # Exec
 exec docker "${DOCKER_ARGS[@]}"
