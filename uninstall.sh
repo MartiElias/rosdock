@@ -1,13 +1,9 @@
-# Uninstalling rosdock from /bin folder
-echo "Uninstalling rosdock from /bin"
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Uninstalling rosdock from /usr/local/bin"
 sudo rm /usr/local/bin/rosdock
+echo "✅ rosdock uninstalled successfully."
 
-# Check exit status of last command
-if [ $? -eq 0 ]; then
-    echo "✅ Command executed successfully."
-else
-    echo "❌ Error: command failed."
-fi
-
-# sudo rm /bin/rosdock_connect 
-# sed -i '/soruce rosdock_connect/d' ~/bashrc
+echo "Note: yq has been left installed because it may have been present before rosdock or be used by other tools."
+echo "If you are sure you no longer need it, you can remove it with: sudo apt-get remove yq"
