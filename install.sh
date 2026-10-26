@@ -14,3 +14,12 @@ fi
 echo "Installing rosdock in /usr/local/bin"
 sudo install -m 755 "$SCRIPT_DIR/rosdock" /usr/local/bin/rosdock
 echo "✅ rosdock installed successfully."
+
+# Optional Bash completion instructions
+cat <<'EOF'
+
+Optional: enable Bash autocompletion.
+Add this to ~/.bashrc, then run: source ~/.bashrc
+
+complete -o nospace -W 'attach --image= --root= --name= --gpus= --display= --rm= --env --mount --device --group_add --docker_args= --verbose --help' rosdock
+EOF
